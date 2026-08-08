@@ -54,3 +54,18 @@ native metric name. Local diagnostics additionally record mean pinball loss,
 80% interval coverage/width when q10 and q90 exist, and quantile crossing rate.
 TimesFM 2.5's documented output provides q10 through q90, so a 90% interval
 (q05--q95) is not fabricated and is stored as unavailable.
+
+## Milestone 2 executed configurations
+
+The low-bit pilot used two lower-relative-risk configurations rather than
+Electricity. `saugeenday/D/short` resolved to one effective univariate series
+and 20 official windows (horizon 30). `bizitobs_l2c/5T/short` resolved to seven
+effective univariate series and 140 windows in total (horizon 48). Both used a
+configured context length of 1024 and the same q10--q90 output levels for every
+precision variant.
+
+`bitbrains_fast_storage/5T/short` remains a candidate for the final paper,
+but its current `to_univariate` expansion produces 45,000 windows. It was
+therefore not used as primary CPU evidence in Milestone 2. This is a workload
+scope decision, not a contamination clearance; its status remains lower
+relative risk but unverified for direct overlap.

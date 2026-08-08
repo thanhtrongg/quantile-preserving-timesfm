@@ -7,6 +7,7 @@ real baseline run fails with an actionable installation message.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -23,7 +24,7 @@ TIMESFM_25_QUANTILE_LEVELS = np.asarray(
 
 @dataclass(frozen=True)
 class TimesFMConfig:
-    """Inference settings for the FP32 TimesFM 2.5 baseline."""
+    """Inference and precision settings for TimesFM 2.5."""
 
     checkpoint: str = "google/timesfm-2.5-200m-pytorch"
     dtype: str = "float32"
@@ -35,6 +36,9 @@ class TimesFMConfig:
     force_flip_invariance: bool = True
     infer_is_positive: bool = False
     device: str = "auto"
+    torch_compile: bool = True
+    quantization_backend: str = "none"
+    quantization_group_size: int = 128
 
 
 def _as_numpy(value: Any) -> np.ndarray:
@@ -129,12 +133,29 @@ class TimesFMAdapter:
     """Adapter exposing a stable ``forecast(history_batch, prediction_length)`` API."""
 
     def __init__(self, config: TimesFMConfig, model: Any | None = None):
-        if config.dtype.lower() not in {"float32", "fp32"}:
+        if config.dtype.lower() not in {"float32", "fp32", "bfloat16", "bf16"}:
             raise ValueError(
-                f"Milestone 1 is FP32 only; received dtype={config.dtype!r}."
+                f"Unsupported TimesFM floating-point dtype={config.dtype!r}. "
+                "Use float32 or bfloat16."
             )
+        if config.quantization_backend not in {
+            "none",
+            "torchao_int8_weight_only",
+            "torchao_int8_dynamic_activation_int8_weight",
+            "torchao_int4_weight_only",
+        }:
+            raise ValueError(
+                "Unsupported quantization backend: "
+                f"{config.quantization_backend!r}"
+            )
+        if config.quantization_group_size <= 0:
+            raise ValueError("quantization_group_size must be positive")
         self.config = config
+        self._autocast_dtype: Any | None = None
+        self._quantized_linear_names: list[str] = []
+        self._excluded_quantization_module_types: list[str] = []
         self._model = model if model is not None else self._load_model()
+        self._prepare_precision()
         self._compile_model()
 
     def _load_model(self) -> Any:
@@ -152,10 +173,90 @@ class TimesFMAdapter:
                 "Installed `timesfm` does not expose the TimesFM 2.5 PyTorch API. "
                 "Do not fall back to the archived TimesFM 1.x API."
             )
-        model = model_class.from_pretrained(self.config.checkpoint)
+        # Quantization must happen before compiling the module.  The FP32/BF16
+        # path can use the checkpoint loader's compiled forward directly.
+        compile_on_load = self.config.torch_compile and self.config.quantization_backend == "none"
+        model = model_class.from_pretrained(
+            self.config.checkpoint,
+            torch_compile=compile_on_load,
+        )
         if self.config.device != "auto" and hasattr(model, "to"):
             model = model.to(self.config.device)
         return model
+
+    def _model_module(self) -> Any:
+        return getattr(self._model, "model", self._model)
+
+    def _prepare_precision(self) -> None:
+        """Apply an explicit BF16 or TorchAO PTQ workflow before compile()."""
+
+        module = self._model_module()
+        dtype = self.config.dtype.lower()
+        if dtype in {"bfloat16", "bf16"}:
+            try:
+                import torch
+            except ImportError as exc:  # pragma: no cover - runtime-only path
+                raise RuntimeError("PyTorch is required for BF16 TimesFM") from exc
+            module.to(torch.bfloat16)
+            self._autocast_dtype = torch.bfloat16
+
+        backend = self.config.quantization_backend
+        if backend == "none":
+            return
+        try:
+            from torchao.quantization import (
+                Int4WeightOnlyConfig,
+                Int8DynamicActivationInt8WeightConfig,
+                Int8WeightOnlyConfig,
+                quantize_,
+            )
+        except ImportError as exc:
+            raise RuntimeError(
+                "TorchAO is required for the requested real PTQ backend."
+            ) from exc
+
+        if backend == "torchao_int8_weight_only":
+            quantize_(module, Int8WeightOnlyConfig())
+        elif backend == "torchao_int8_dynamic_activation_int8_weight":
+            quantize_(module, Int8DynamicActivationInt8WeightConfig())
+        elif backend == "torchao_int4_weight_only":
+            try:
+                quantize_(
+                    module,
+                    Int4WeightOnlyConfig(
+                        group_size=self.config.quantization_group_size
+                    ),
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    "TorchAO INT4 weight-only quantization is unavailable for "
+                    f"this TimesFM/device combination: {type(exc).__name__}: {exc}"
+                ) from exc
+
+        if self.config.torch_compile:
+            try:
+                import torch
+
+                module.forward = torch.compile(module.forward)
+            except Exception as exc:
+                raise RuntimeError(
+                    "The requested TorchAO quantized model could not be compiled: "
+                    f"{type(exc).__name__}: {exc}"
+                ) from exc
+
+        self._quantized_linear_names = [
+            name
+            for name, child in module.named_modules()
+            if child.__class__.__name__ in {"Linear"}
+            and hasattr(getattr(child, "weight", None), "qdata")
+        ]
+        self._excluded_quantization_module_types = sorted(
+            {
+                child.__class__.__name__
+                for name, child in module.named_modules()
+                if name and child.__class__.__name__ not in {"Linear"}
+            }
+        )
 
     def _compile_model(self) -> None:
         try:
@@ -197,7 +298,10 @@ class TimesFMAdapter:
         inputs = _as_input_list(history_batch)
         if self.config.context_length:
             inputs = [history[-self.config.context_length :] for history in inputs]
-        point, raw_quantiles = self._model.forecast(horizon=prediction_length, inputs=inputs)
+        with self._autocast_context():
+            point, raw_quantiles = self._model.forecast(
+                horizon=prediction_length, inputs=inputs
+            )
         normalized = normalize_forecast_output(point, raw_quantiles, model=self._model)
         expected_batch = len(inputs)
         if normalized["point_forecast"].shape != (expected_batch, prediction_length):
@@ -211,6 +315,46 @@ class TimesFMAdapter:
                 f"{normalized['quantile_forecasts'].shape}"
             )
         return normalized
+
+    def _autocast_context(self):
+        if getattr(self, "_autocast_dtype", None) is None:
+            return nullcontext()
+        try:
+            import torch
+
+            module = self._model_module()
+            device = next(module.parameters()).device
+            if device.type not in {"cpu", "cuda"}:
+                return nullcontext()
+            return torch.autocast(device_type=device.type, dtype=self._autocast_dtype)
+        except (ImportError, StopIteration, AttributeError):
+            return nullcontext()
+
+    def quantization_metadata(self) -> Mapping[str, Any]:
+        module = self._model_module()
+        linear_names = [
+            name for name, child in module.named_modules() if child.__class__.__name__ == "Linear"
+        ]
+        return {
+            "backend": self.config.quantization_backend,
+            "dtype": self.config.dtype,
+            "torch_compile": self.config.torch_compile,
+            "quantized_linear_module_count": len(self._quantized_linear_names),
+            "quantized_linear_modules": self._quantized_linear_names,
+            "total_linear_module_count": len(linear_names),
+            "excluded_module_types": self._excluded_quantization_module_types,
+            "group_size": (
+                self.config.quantization_group_size
+                if "int4" in self.config.quantization_backend
+                else None
+            ),
+            "scheme": {
+                "torchao_int8_weight_only": "weight-only; symmetric per-row weight quantization; FP32 activations",
+                "torchao_int8_dynamic_activation_int8_weight": "dynamic symmetric activations and per-row int8 weights",
+                "torchao_int4_weight_only": "weight-only; groupwise int4; group_size=128; CPU compatibility check only",
+                "none": "no quantization",
+            }.get(self.config.quantization_backend, "unknown"),
+        }
 
     def metadata(self) -> Mapping[str, Any]:
         try:
@@ -229,4 +373,6 @@ class TimesFMAdapter:
             "max_horizon": self.config.max_horizon,
             "quantile_head": self.config.quantile_head,
             "fix_quantile_crossing": self.config.fix_quantile_crossing,
+            "torch_compile": self.config.torch_compile,
+            "quantization_backend": self.config.quantization_backend,
         }

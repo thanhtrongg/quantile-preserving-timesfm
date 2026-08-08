@@ -3,9 +3,11 @@
 timesfm[torch]==2.0.2
 salesforce-gift-eval @ git+https://github.com/SalesforceAIResearch/gift-eval.git@d8184bb51079bb5021332f8e5d7486c378a52202
 gluonts==0.15.1
+torchao==0.18.0
 numpy>=1.26,<3
 pandas>=2.0,<3
 pyarrow>=15,<22
 PyYAML>=6.0,<7
 matplotlib>=3.8,<4
 psutil>=5.9,<8
+tabulate>=0.9,<1

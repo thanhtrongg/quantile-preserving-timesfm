@@ -11,6 +11,7 @@ data/
 .cache/
 results/fp32/
 results/fp32_baseline_summary.csv
+results/milestone2/
 results/**/*.parquet
 results/**/*.json
 results/**/*.png

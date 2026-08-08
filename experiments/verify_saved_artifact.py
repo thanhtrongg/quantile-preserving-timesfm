@@ -50,6 +50,8 @@ def verify(run_dir: Path, check_gift: bool) -> dict[str, object]:
     if levels.size == 0:
         raise AssertionError("No quantile columns found in forecasts.parquet")
 
+    resolved = config.get("resolved", config.get("benchmark", {}))
+    horizon = int(resolved["prediction_length"] if "prediction_length" in resolved else resolved["resolved_prediction_length"])
     keys = (
         forecasts[["series_id", "forecast_window_id"]]
         .drop_duplicates()
@@ -64,7 +66,7 @@ def verify(run_dir: Path, check_gift: bool) -> dict[str, object]:
         (str(row.series_id), int(row.forecast_window_id)): np.asarray(row.history_values, dtype=np.float64)
         for row in contexts.itertuples(index=False)
     }
-    expected_steps = np.arange(int(config["benchmark"]["resolved_prediction_length"]))
+    expected_steps = np.arange(horizon)
     for series_id, window_id in keys:
         key = (str(series_id), int(window_id))
         frame = forecasts[
@@ -89,7 +91,8 @@ def verify(run_dir: Path, check_gift: bool) -> dict[str, object]:
     if not (np.isfinite(y).all() and np.isfinite(point).all() and np.isfinite(q).all()):
         raise AssertionError("NaN or infinite values found in saved forecasts")
     crossing = quantile_crossing_rate(q)
-    seasonality = seasonality_from_frequency(config["benchmark"].get("resolved_frequency"))
+    frequency = resolved.get("frequency", config.get("benchmark", {}).get("resolved_frequency"))
+    seasonality = seasonality_from_frequency(frequency)
     per_window_mase = [
         mase(y[index : index + 1], point[index : index + 1], history[index][None, :], seasonality)
         for index in range(y.shape[0])
@@ -125,12 +128,14 @@ def verify(run_dir: Path, check_gift: bool) -> dict[str, object]:
 
     official_check = {"status": "not_requested"}
     if check_gift:
-        dataset_cfg = config["benchmark"]["dataset"]
+        dataset_cfg = config.get("dataset", config.get("benchmark", {}).get("dataset"))
+        if dataset_cfg is None:
+            raise AssertionError("Artifact config does not identify its dataset")
         dataset = load_gift_dataset(
             dataset_cfg["name"],
             term=dataset_cfg["term"],
-            to_univariate=bool(config["benchmark"].get("to_univariate", True)),
-            storage_env_var=str(config["benchmark"].get("storage_env_var", "GIFT_EVAL")),
+            to_univariate=bool(config.get("benchmark", {}).get("to_univariate", True)),
+            storage_env_var=str(config.get("benchmark", {}).get("storage_env_var", "GIFT_EVAL")),
         )
         official_windows = list(iter_test_windows(dataset, dataset_name=dataset_cfg["name"]))
         if len(official_windows) != len(targets):
