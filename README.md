@@ -21,6 +21,7 @@ dataset/window cherry-picking.
 - GIFT-Eval package source: official repository commit
   `d8184bb51079bb5021332f8e5d7486c378a52202`; package metadata currently
   reports `0.0.0a0`.
+- Official GluonTS evaluator dependency: `0.15.1`.
 
 The adapter uses the official TimesFM 2.5 API:
 `TimesFM_2p5_200M_torch.from_pretrained`, `ForecastConfig`, `compile`, and
@@ -87,7 +88,16 @@ Inspect metrics and plot one stored forecast:
 ```bash
 Get-Content results/fp32_baseline_summary.csv
 python -m experiments.plot_probabilistic_forecast `
-  --run results/fp32/timesfm_2_5_200m/electricity_15t/run_001
+  --run results/fp32/timesfm_2_5_200m/saugeenday_d/run_005
+```
+
+Verify a saved run in a fresh process without invoking TimesFM again:
+
+```bash
+$env:GIFT_EVAL = (Resolve-Path .\data\GiftEval).Path
+python -m experiments.verify_saved_artifact `
+  --run results/fp32/timesfm_2_5_200m/saugeenday_d/run_005 `
+  --check-gift
 ```
 
 ## Artifact layout
@@ -118,9 +128,35 @@ quantile loss diagnostic, q10–q90 coverage and width, and quantile crossing
 rate. MASE, MAE, and RMSE are also recorded for row-level analysis. No custom
 composite score is used.
 
-## Current reproducibility status
+## Current Status
 
-The repository contains the real TimesFM/GIFT-Eval integration and tests, but
-Milestone 1 is only complete after a real uncapped GIFT-Eval run succeeds.
-The source workspace used to create this scaffold has no downloaded checkpoint
-or GIFT-Eval dataset, so no benchmark numbers are committed or claimed here.
+Milestone 1 is complete for the documented uncapped validation configuration.
+On 2026-08-08, the project executed the official `saugeenday/D/short` GIFT-Eval
+configuration with the TimesFM 2.5 PyTorch checkpoint in FP32. The run resolved
+to 1 series, 20 official rolling windows, horizon 30, and a configured model
+context length of 1024. The model returned point tensors shaped `(20, 30)` and
+quantile tensors shaped `(20, 30, 9)` for levels q10 through q90:
+`[0.1, 0.2, ..., 0.9]`.
+
+The official evaluator completed with `MASE[0.5] = 0.9576581410557075` and
+`mean_weighted_sum_quantile_loss = 0.3998879188840172`. Local diagnostics were
+MAE `14.402809721628826`, RMSE `37.79344171011944`, MASE
+`0.9576581255726564`, mean pinball loss `6.172969706782588`, q10--q90
+coverage `0.7866666666666666`, interval width `31.963772219022115`, and
+quantile crossing rate `0.0`. Forecast-only runtime was `16.5236246 s`; total
+runtime including loading and official evaluation was `35.1395351 s`; peak
+process memory was `2025.0 MiB` on the CPU-only PyTorch environment used for
+this run.
+
+The saved artifact is under
+`results/fp32/timesfm_2_5_200m/saugeenday_d/run_005/`. A fresh Python process
+reloaded the Parquet/JSON files, reproduced every local diagnostic metric,
+confirmed finite and non-decreasing quantiles, and matched all 20 saved
+contexts and labels to the official GIFT-Eval windows. Results and downloaded
+data are intentionally ignored by Git; the commands above reproduce them when
+`GIFT_EVAL` is configured.
+
+No FP16, INT8, INT4, PTQ, proposed quantization method, fine-tuning, or QAT has
+been started. Contamination status is documented in
+`docs/gift_eval_selection.md`; Electricity remains development-only because
+benchmark/pretraining overlap cannot be ruled out.

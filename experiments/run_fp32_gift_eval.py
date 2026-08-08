@@ -71,7 +71,17 @@ def _peak_memory_mb() -> float | None:
             return float(torch.cuda.max_memory_allocated() / (1024**2))
     except ImportError:
         pass
-    return None
+    try:
+        import psutil
+
+        process_memory = psutil.Process().memory_info()
+        # Windows exposes peak_wset; on other platforms use the current RSS as
+        # the portable fallback.  This keeps the reported peak metric useful
+        # when the installed PyTorch wheel is CPU-only.
+        peak_bytes = getattr(process_memory, "peak_wset", process_memory.rss)
+        return float(peak_bytes / (1024**2))
+    except (ImportError, AttributeError):
+        return None
 
 
 def _cpu_ram_mb() -> float | None:
@@ -194,7 +204,13 @@ def _run_dataset(
     )
     run_config = {
         **config,
-        "benchmark": {**benchmark, "dataset": dataset_config, "resolved_prediction_length": prediction_length},
+        "benchmark": {
+            **benchmark,
+            "dataset": dataset_config,
+            "resolved_prediction_length": prediction_length,
+            "resolved_frequency": str(dataset.freq),
+            "official_windows_per_series": int(dataset.windows),
+        },
         "reproducibility": {
             "timesfm_version": "2.0.2",
             "timesfm_repository_commit": PINNED_TIMESFM_COMMIT,

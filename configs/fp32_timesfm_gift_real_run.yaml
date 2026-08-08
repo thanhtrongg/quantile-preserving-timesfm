@@ -14,18 +14,10 @@ benchmark:
   name: gift_eval
   storage_env_var: GIFT_EVAL
   to_univariate: true
-  # The official Dataset loader derives each horizon and rolling-window count.
   prediction_length: null
   datasets:
-    - name: electricity/15T
-      term: short
-    - name: solar/10T
-      term: short
-    - name: hospital
-      term: short
-    - name: restaurant
-      term: short
-    - name: bitbrains_fast_storage/5T
+    # One official, uncapped configuration for the Milestone 1 validation.
+    - name: saugeenday/D
       term: short
 
 runtime:

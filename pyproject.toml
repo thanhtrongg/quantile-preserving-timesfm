@@ -19,6 +19,7 @@ dependencies = [
 runtime = [
   "timesfm[torch]==2.0.2",
   "salesforce-gift-eval @ git+https://github.com/SalesforceAIResearch/gift-eval.git@d8184bb51079bb5021332f8e5d7486c378a52202",
+  "gluonts==0.15.1",
   "psutil>=5.9,<8",
 ]
 dev = [

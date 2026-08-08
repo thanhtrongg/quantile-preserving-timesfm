@@ -215,8 +215,9 @@ class TimesFMAdapter:
     def metadata(self) -> Mapping[str, Any]:
         try:
             import timesfm  # type: ignore[import-not-found]
+            from importlib.metadata import version as package_version
 
-            version = getattr(timesfm, "__version__", "unknown")
+            version = getattr(timesfm, "__version__", None) or package_version("timesfm")
         except ImportError:
             version = "not-installed"
         return {

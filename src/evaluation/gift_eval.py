@@ -19,6 +19,7 @@ from src.metrics.diagnostics import (
     rmse,
     weighted_quantile_loss,
 )
+from src.models.timesfm import TIMESFM_25_QUANTILE_LEVELS
 
 
 @dataclass(frozen=True)
@@ -63,7 +64,16 @@ def load_gift_dataset(
         raise RuntimeError(
             "GIFT-Eval is not installed. Install requirements-lock.txt to use the official loader."
         ) from exc
-    return Dataset(name=name, term=term, to_univariate=to_univariate, storage_env_var=storage_env_var)
+    # The official transformation is intended for genuinely multivariate
+    # targets.  Applying MultivariateToUnivariate to an already-univariate
+    # target iterates over scalar values and produces zero-dimensional targets,
+    # which GluonTS cannot split into test windows.  Inspect the official
+    # dataset metadata first, then request the transformation only when it is
+    # needed.
+    dataset = Dataset(name=name, term=term, to_univariate=False, storage_env_var=storage_env_var)
+    if to_univariate and int(dataset.target_dim) > 1:
+        dataset = Dataset(name=name, term=term, to_univariate=True, storage_env_var=storage_env_var)
+    return dataset
 
 
 def _to_1d_target(value: Any, field: str) -> np.ndarray:
@@ -294,7 +304,13 @@ def official_gift_eval_metrics(dataset: Any, adapter: Any, *, batch_size: int = 
 
     predictor = _TimesFMPredictor(adapter, prediction_length=int(dataset.prediction_length))
     seasonality = seasonality_from_frequency(getattr(dataset, "freq", None))
-    metrics = [MASE(), MeanWeightedSumQuantileLoss()]
+    # GluonTS 0.15.1 requires the levels explicitly.  These are the nine
+    # quantiles returned by the official TimesFM 2.5 continuous head; the
+    # point/mean channel is not passed as a quantile level.
+    metrics = [
+        MASE(),
+        MeanWeightedSumQuantileLoss(quantile_levels=TIMESFM_25_QUANTILE_LEVELS.tolist()),
+    ]
     values = evaluate_model(
         predictor,
         test_data=dataset.test_data,
@@ -313,6 +329,14 @@ def official_gift_eval_metrics(dataset: Any, adapter: Any, *, batch_size: int = 
 def _json_scalar(value: Any) -> Any:
     if isinstance(value, np.generic):
         return value.item()
+    if isinstance(value, Mapping):
+        # evaluate_model returns a one-row DataFrame; DataFrame.to_dict()
+        # therefore wraps each scalar as {None: value}.  Unwrap that stable
+        # representation while retaining a normal mapping for any future
+        # multi-index evaluator output.
+        if len(value) == 1 and next(iter(value)) is None:
+            return _json_scalar(next(iter(value.values())))
+        return {str(key): _json_scalar(item) for key, item in value.items()}
     if isinstance(value, (float, int, str, bool)) or value is None:
         return value
     return str(value)

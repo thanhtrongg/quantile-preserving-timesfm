@@ -14,15 +14,38 @@ raw configuration's number of variates.
 
 | Dataset/Config | Domain | Frequency | Horizon | # Series | Probabilistic Evaluation Support | Why Selected | Leakage/Contamination Risk |
 |---|---|---:|---:|---:|---|---|---|
-| `electricity/15T/short` | Energy | 15 min | 48 | runtime-resolved | Yes | Medium-sized high-frequency energy series and a canonical GIFT-Eval configuration | TimesFM is zero-shot here; inspect the benchmark/model contamination records before reporting as zero-leakage |
-| `solar/10T/short` | Energy | 10 min | 48 | runtime-resolved | Yes | Different energy signal and sampling cadence from Electricity | Same benchmark-level review required |
-| `hospital/M/short` | Healthcare | Monthly | 12 | runtime-resolved | Yes | Monthly healthcare demand, giving a lower-frequency domain contrast | Same benchmark-level review required |
-| `restaurant/D/short` | Sales | Daily | 30 | runtime-resolved | Yes | Daily sales series with a clear short horizon | Same benchmark-level review required |
-| `bitbrains - fast storage/5T/short` | Web/CloudOps | 5 min | 48 | runtime-resolved | Yes | High-frequency operations data from a distinct domain | Same benchmark-level review required |
+| `electricity/15T/short` | Energy | 15 min | 48 | runtime-resolved | Yes | Medium-sized high-frequency energy series and a canonical GIFT-Eval configuration | Development-only: high contamination concern; do not present as leakage-free |
+| `solar/10T/short` | Energy | 10 min | 48 | runtime-resolved | Yes | Different energy signal and sampling cadence from Electricity | Possible benchmark overlap; not treated as leakage-free |
+| `hospital/short` | Healthcare | Monthly | 12 | runtime-resolved | Yes | Monthly healthcare demand, giving a lower-frequency domain contrast | Possible indirect overlap through documented GiftEvalPretrain provenance; no zero-leakage claim |
+| `restaurant/short` | Sales | Daily | 30 | runtime-resolved | Yes | Daily sales series with a clear short horizon | Possible indirect overlap through documented GiftEvalPretrain provenance; no zero-leakage claim |
+| `bitbrains_fast_storage/5T/short` | Web/CloudOps | 5 min | 48 | runtime-resolved | Yes | High-frequency operations data from a distinct domain | Lower relative risk candidate; possible indirect GiftEvalPretrain overlap remains unverified |
+
+The uncapped Milestone 1 validation uses `saugeenday/D/short` (daily,
+horizon 30, one series, 20 official windows). It is a lower-relative-risk
+pilot rather than a claim of zero contamination. The public [TimesFM 2.5 model
+card](https://huggingface.co/google/timesfm-2.5-200m-pytorch) lists
+`GiftEvalPretrain` among pretraining sources, so every GIFT-Eval
+test result is treated as potentially contaminated unless a direct overlap
+audit establishes otherwise. Electricity is retained for pipeline development
+only.
+
+Candidate configurations for the final paper, subject to a documented overlap
+audit, are:
+
+- `bitbrains_fast_storage/5T/short` (CloudOps, 5-minute horizon 48)
+- `bizitobs_l2c/5T/short` (IT operations, 5-minute horizon 48)
+- `saugeenday/D/short` (daily horizon 30)
+- `car_parts_with_missing/M/short` (monthly horizon 12)
+
+These are lower-relative-risk choices because their public names are not
+directly identified as TimesFM 2.5 pretraining sources in the model card. They
+are not certified leakage-free: shared `GiftEvalPretrain` provenance and the
+benchmark's historical leakage concerns must still be reported.
 
 The domain, frequency, variate counts, and horizon mapping are taken from the
 official GIFT-Eval metadata/loader. The loader's current mapping gives 48 for
-the `T` configurations and 12 for the monthly `M` configuration. If one of the
+the `T` configurations, 30 for the daily `D` configurations, and 12 for the
+monthly `M` configuration. If one of the
 paths is absent in a downloaded release, the runner fails with the exact path;
 it does not silently substitute another dataset.
 
