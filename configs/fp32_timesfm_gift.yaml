@@ -1,0 +1,37 @@
+model:
+  name: timesfm_2_5_200m
+  checkpoint: google/timesfm-2.5-200m-pytorch
+  dtype: float32
+  context_length: 1024
+  max_horizon: 256
+  quantile_head: true
+  fix_quantile_crossing: true
+  normalize_inputs: true
+  force_flip_invariance: true
+  infer_is_positive: false
+
+benchmark:
+  name: gift_eval
+  storage_env_var: GIFT_EVAL
+  to_univariate: true
+  # The official Dataset loader derives each horizon and rolling-window count.
+  prediction_length: null
+  datasets:
+    - name: electricity/15T
+      term: short
+    - name: solar/10T
+      term: short
+    - name: hospital/M
+      term: short
+    - name: restaurant/D
+      term: short
+    - name: bitbrains - fast storage/5T
+      term: short
+
+runtime:
+  device: auto
+  batch_size: 8
+  seed: 20260808
+  max_series: null
+  max_windows: null
+  output_root: results
