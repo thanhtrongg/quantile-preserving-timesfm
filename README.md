@@ -179,8 +179,8 @@ for this CPU-only environment.
 
 Relative to FP32, BF16 and INT8 changed official MASE and WQL by at most
 0.09% and 0.05% respectively across these two pilot configurations. Their
-quantile outputs nevertheless showed measurable small deviations: median
-absolute q-level deviations ranged from 0.0423 to 0.1092 for INT8 and from
+quantile outputs nevertheless showed measurable small deviations: mean
+absolute q50 deviations ranged from 0.0423 to 0.1092 for INT8 and from
 0.0717 to 0.0966 for BF16 in the two configurations; mean q10--q90 width
 changes were positive in all completed comparisons. This is a WEAK SIGNAL for
 the pilot research question: accuracy was broadly preserved, but two
