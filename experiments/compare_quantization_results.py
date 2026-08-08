@@ -73,6 +73,16 @@ def _summary_row(dataset: str, variant: str, run_dir: Path, metrics: dict[str, A
         "wql": _metric(metrics, "wql"),
         "mean_pinball_loss": metrics.get("mean_pinball_loss"),
         "coverage_80": metrics.get("coverage_80"),
+        "coverage_80_delta_to_nominal": (
+            metrics.get("coverage_80") - 0.8
+            if metrics.get("coverage_80") is not None
+            else None
+        ),
+        "coverage_80_abs_calibration_deviation": (
+            abs(metrics.get("coverage_80") - 0.8)
+            if metrics.get("coverage_80") is not None
+            else None
+        ),
         "width_80": metrics.get("width_80"),
         "quantile_crossing_rate": metrics.get("quantile_crossing_rate"),
         "runtime_seconds": metrics.get("runtime_seconds"),
@@ -103,6 +113,8 @@ def _write_markdown(frame: pd.DataFrame, path: Path) -> None:
         "wql",
         "mean_pinball_loss",
         "coverage_80",
+        "coverage_80_delta_to_nominal",
+        "coverage_80_abs_calibration_deviation",
         "width_80",
         "runtime_seconds",
         "peak_memory_mb",
@@ -118,6 +130,8 @@ def _write_markdown(frame: pd.DataFrame, path: Path) -> None:
         "WQL",
         "Pinball",
         "Coverage80",
+        "Coverage80 - 0.8",
+        "Absolute calibration deviation",
         "Width80",
         "Runtime (s)",
         "Peak memory (MiB)",
@@ -138,14 +152,16 @@ def _write_latex(frame: pd.DataFrame, path: Path) -> None:
         "wql",
         "mean_pinball_loss",
         "coverage_80",
+        "coverage_80_delta_to_nominal",
+        "coverage_80_abs_calibration_deviation",
         "width_80",
         "runtime_seconds",
         "peak_memory_mb",
     ]
     lines = [
-        r"\begin{tabular}{llrrrrrrr}",
+        r"\begin{tabular}{llrrrrrrrrr}",
         r"\toprule",
-        r"Dataset & Precision & MASE & WQL & Pinball & Coverage80 & Width80 & Runtime (s) & Peak memory (MiB) \\",
+        r"Dataset & Precision & MASE & WQL & Pinball & Coverage80 & Coverage80-0.8 & |Coverage80-0.8| & Width80 & Runtime (s) & Peak memory (MiB) \\",
         r"\midrule",
     ]
     for _, row in frame.iterrows():

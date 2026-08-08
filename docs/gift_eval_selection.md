@@ -80,7 +80,7 @@ sources; none is certified leakage-free.
 | Configuration | Resolved official windows | Contamination status | M3 execution status |
 |---|---:|---|---|
 | `saugeenday/D/short` | 20 | Lower-relative-risk candidate; direct overlap unverified | Full FP32/BF16/INT8 reuse and real INT4 |
-| `bizitobs_l2c/5T/short` | 140 | Lower-relative-risk candidate; direct overlap unverified | Full FP32/BF16/INT8 reuse; INT4 not completed on CPU |
+| `bizitobs_l2c/5T/short` | 140 | Lower-relative-risk candidate; direct overlap unverified | Full FP32/BF16/INT8 reuse and real INT4 |
 | `bitbrains_fast_storage/5T/short` | 45,000 | Lower-relative-risk candidate; direct overlap unverified | One-window real probe; full low-bit matrix resource-limited |
 | `car_parts_with_missing/M/short` | 2,674 | Lower-relative-risk candidate; direct overlap unverified | One-window real probe; full low-bit matrix resource-limited |
 

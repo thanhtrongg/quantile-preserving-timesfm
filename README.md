@@ -141,14 +141,14 @@ width are q10--q90 (nominal 80%). Runtime is forecast runtime in seconds.
 | bizitobs_l2c/5T/short | FP32 | 0.283652 | 0.078124 | 0.283652 | 2.738579 | 4.701967 | 1.137366 | 0.749107 | 7.852345 | 882.299 | 69.337 |
 | bizitobs_l2c/5T/short | BF16 | 0.283834 | 0.078147 | 0.283834 | 2.739022 | 4.695142 | 1.137709 | 0.749256 | 7.862237 | 441.149 | 206.039 |
 | bizitobs_l2c/5T/short | INT8 | 0.283545 | 0.078100 | 0.283545 | 2.738276 | 4.695800 | 1.137027 | 0.751935 | 7.896858 | 221.765 | 168.722 |
-| bizitobs_l2c/5T/short | INT4 | not executed full | — | — | — | — | — | — | — | — | — |
+| bizitobs_l2c/5T/short | INT4 | 0.285653 | 0.079739 | 0.285653 | 2.757440 | 4.694989 | 1.160891 | 0.748661 | 7.869725 | 111.205 | 1339.866 |
 
 #### Full-dataset coverage status
 
 | Configuration | Full official windows | Status |
 |---|---:|---|
 | `saugeenday/D/short` | 20 | FP32/BF16/INT8 reused; real INT4 executed |
-| `bizitobs_l2c/5T/short` | 140 | FP32/BF16/INT8 reused; INT4 not completed on CPU |
+| `bizitobs_l2c/5T/short` | 140 | FP32/BF16/INT8 reused; real INT4 executed |
 | `bitbrains_fast_storage/5T/short` | 45,000 | Not completed; real one-window probe for all four precisions |
 | `car_parts_with_missing/M/short` | 2,674 | Not completed; real one-window probe for all four precisions |
 
@@ -165,7 +165,26 @@ points`, and ΔWidth80 `+3.614` (relative `+11.307%`). Mean absolute quantile
 deviation was q50 `0.880983`, lower-tail q10--q20 `3.795647`, and upper-tail
 q80--q90 `3.489523`; the mean q10--q90 width change was `+3.614219`.
 Thus tail distortion was materially larger than median distortion in the
-completed INT4 configuration, while aggregate point error did not increase.
+completed Saugeenday INT4 configuration, while aggregate point error did not
+increase.
+
+On Bizitobs, INT4 minus FP32 was ΔMASE `+0.002001` (relative `+0.705%`),
+ΔWQL `+0.001616` (relative `+2.068%`), ΔCoverage80 `-0.0446 percentage
+points`, and ΔWidth80 `+0.017381` (relative `+0.221%`). Quantile deviation
+q10--q90 was `[0.679492, 0.658711, 0.586206, 0.543605, 0.344484,
+0.527620, 0.575897, 0.626268, 0.678543]`; q50 deviation was `0.344484`,
+lower-tail q10--q20 was `0.669102`, and upper-tail q80--q90 was `0.652406`.
+Both tails therefore exceeded the median deviation on the second full INT4
+dataset as well.
+
+Coverage is interpreted against the nominal 0.8 target, not as “higher is
+better”. On Saugeenday, FP32 coverage was `0.786667` (signed delta
+`-0.013333`, absolute calibration deviation `0.013333`) and INT4 coverage
+was `0.850000` (signed delta `+0.050000`, absolute deviation `0.050000`).
+On Bizitobs, FP32 was `0.749107` (absolute deviation `0.050893`) and INT4
+was `0.748661` (signed delta `-0.051339`, absolute deviation `0.051339`).
+Thus INT4 moved farther from the nominal target on both full datasets, even
+though the direction of the raw coverage change differed.
 
 The available INT8 deltas remain small: Saugeenday ΔWQL `+0.000182`,
 ΔCoverage80 `-1.667 pp`, ΔWidth80 `+0.031566`; Bizitobs ΔWQL `-0.000023`,
@@ -175,14 +194,14 @@ from artifacts rather than hard-coded in the comparison scripts.
 
 #### Scientific assessment
 
-**WEAK SIGNAL (provisional for the four-configuration scope).** The completed
-real INT4 Saugeenday run shows clear quantile/tail distortion and an 11.3%
-interval-width increase, with official probabilistic degradation larger than
-the point change. However, full INT4 results are unavailable for the other
-three selected configurations on this CPU environment, and BF16/INT8 remain
-close to FP32. The evidence is therefore insufficient for GO or STRONG GO;
-the next milestone must not start the proposed method until the remaining
-full INT4 coverage is reviewed.
+**GO (based on the two full INT4 configurations; still limited for the
+four-configuration scope).** Both completed datasets show tail quantile
+distortion greater than q50 distortion, higher official WQL than FP32, and
+larger probabilistic degradation than point degradation or improvement. Both
+also move farther from nominal 80% coverage when measured by absolute
+calibration deviation. The effect size is heterogeneous—especially for
+interval width—and Bitbrains/Car Parts remain resource-limited bounded probes,
+so this is not STRONG GO. No Milestone 4 method is started.
 
 ## Tables and figures
 

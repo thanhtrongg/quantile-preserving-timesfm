@@ -72,15 +72,34 @@ shape, and INT4 compatibility; these probes are explicitly marked
 
 The official downloaded snapshot resolves to 45,000 Bitbrains windows
 (horizon 48) and 2,674 Car Parts windows (horizon 12). On this CPU, one real
-INT4 batch of 20 Saugeenday windows took 188.8 seconds, while the saved full
-INT4 run took 177.5 forecast seconds for 20 windows. Extrapolating that
-measured throughput would require many hours for Car Parts and multiple days
-for Bitbrains, before the other precisions. The repository therefore reports
-those two full configurations as `missing` rather than fabricating aggregate
-metrics or relabelling bounded probes as official GIFT-Eval results.
+INT4 batch of 20 Saugeenday windows took 188.8 seconds. The saved full runs
+took 187.1 forecast seconds for 20 Saugeenday windows and 1339.9 forecast
+seconds for 140 Bizitobs windows. Extrapolating that measured throughput would
+require many hours for Car Parts and multiple days for Bitbrains, before the
+other precisions. The repository therefore reports those two full
+configurations as `missing` rather than fabricating aggregate metrics or
+relabelling bounded probes as official GIFT-Eval results.
 
 This limitation prevents a four-configuration generalization claim. It does
-not invalidate the completed real INT4 result or its saved-artifact checks.
+not invalidate the two completed real INT4 results or their saved-artifact
+checks.
+
+## Two full INT4 results
+
+Saugeenday INT4 produced official `MASE[0.5]=0.941699` and official WQL
+`0.404470`, with MAE `14.162478`, RMSE `37.390130`, mean pinball `6.243707`,
+coverage `0.850000`, width `35.577992`, and crossing rate `0.0`.
+
+Bizitobs INT4 produced official `MASE[0.5]=0.285653` and official WQL
+`0.079739`, with MAE `2.757440`, RMSE `4.694989`, mean pinball `1.160891`,
+coverage `0.748661`, width `7.869725`, and crossing rate `0.0`. Its point and
+quantile shapes were `(140, 48)` and `(140, 48, 9)`.
+
+Coverage is not interpreted as “higher is better”. Relative to the nominal
+0.8 target, Saugeenday FP32/INT4 absolute deviations were `0.013333` and
+`0.050000`; Bizitobs FP32/INT4 absolute deviations were `0.050893` and
+`0.051339`. Thus INT4 moved farther from the nominal target on both full
+datasets, although the raw coverage direction differed.
 
 ## Artifact discipline
 
@@ -101,5 +120,5 @@ The full M3 comparison outputs are generated from artifacts:
 Fresh-process verification loads the saved Parquet files, checks finite and
 ordered quantiles, checks context/ground-truth alignment against the official
 loader, and reproduces local diagnostics without loading TimesFM or rerunning
-inference. The INT4 Saugeenday verification also reproduced official
-`MASE[0.5]` and official mean weighted quantile loss from the saved forecasts.
+inference. Both INT4 verifications reproduced official `MASE[0.5]` and
+official mean weighted quantile loss from the saved forecasts.
