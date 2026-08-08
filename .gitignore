@@ -12,6 +12,8 @@ data/
 results/fp32/
 results/fp32_baseline_summary.csv
 results/milestone2/
+results/milestone3/
+results/milestone3_probes/
 results/**/*.parquet
 results/**/*.json
 results/**/*.png

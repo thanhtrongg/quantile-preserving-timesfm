@@ -58,8 +58,26 @@ def _slug(value: str) -> str:
     )
 
 
+def _dataset_label(dataset_config: dict[str, Any]) -> str:
+    return str(
+        dataset_config.get(
+            "label",
+            f"{dataset_config['name']}/{dataset_config.get('term', 'short')}",
+        )
+    )
+
+
+def _dataset_run_key(dataset_label: str) -> str:
+    dataset_key = (
+        dataset_label.rsplit("/", 1)[0]
+        if dataset_label.rsplit("/", 1)[-1] in {"short", "medium", "long"}
+        else dataset_label
+    )
+    return _slug(dataset_key)
+
+
 def _next_run_dir(root: Path, variant: str, dataset_name: str) -> Path:
-    dataset_root = root / variant / _slug(dataset_name)
+    dataset_root = root / variant / _dataset_run_key(dataset_name)
     dataset_root.mkdir(parents=True, exist_ok=True)
     candidates = [
         int(path.name.removeprefix("run_"))
@@ -177,7 +195,7 @@ def _write_unsupported(
     metrics = {
         "status": "unsupported",
         "precision": variant["name"],
-        "dataset": f"{dataset_config['name']}/{dataset_config.get('term', 'short')}",
+        "dataset": _dataset_label(dataset_config),
         "error": f"{type(error).__name__}: {error}",
         "quantization": {
             "backend": variant.get("quantization_backend", "none"),
@@ -206,7 +224,8 @@ def _run_dataset(
     variant_name = str(variant["name"])
     dataset_name = str(dataset_config["name"])
     term = str(dataset_config.get("term", "short"))
-    run_dir = _next_run_dir(output_root, variant_name, dataset_name)
+    dataset_label = _dataset_label(dataset_config)
+    run_dir = _next_run_dir(output_root, variant_name, dataset_label)
     started = time.perf_counter()
     dataset = load_gift_dataset(
         dataset_name,
@@ -214,7 +233,16 @@ def _run_dataset(
         to_univariate=bool(benchmark.get("to_univariate", True)),
         storage_env_var=str(benchmark.get("storage_env_var", "GIFT_EVAL")),
     )
-    windows = list(iter_test_windows(dataset, dataset_name=dataset_name))
+    max_series = benchmark.get("max_series")
+    max_windows = benchmark.get("max_windows")
+    windows = list(
+        iter_test_windows(
+            dataset,
+            dataset_name=dataset_name,
+            max_series=int(max_series) if max_series is not None else None,
+            max_windows=int(max_windows) if max_windows is not None else None,
+        )
+    )
     if not windows:
         raise RuntimeError(f"The official GIFT-Eval loader returned no windows for {dataset_name}/{term}")
     prediction_length = int(benchmark.get("prediction_length") or dataset.prediction_length)
@@ -238,8 +266,13 @@ def _run_dataset(
     metrics = aggregate_diagnostics(forecasts)
     metrics["status"] = "completed"
     metrics["precision"] = variant_name
-    metrics["dataset"] = f"{dataset_name}/{term}"
+    metrics["dataset"] = dataset_label
     metrics["model_load_seconds"] = model_load_seconds
+    metrics["evaluation_scope"] = (
+        "bounded_probe"
+        if max_series is not None or max_windows is not None
+        else "full_official_test_windows"
+    )
     metrics["parameter_storage_mb"] = parameter_storage_mb
     metrics["serialized_model_size_mb"] = serialized_state_size_mb
     metrics["serialized_model_size_note"] = (
@@ -248,23 +281,34 @@ def _run_dataset(
         else "temporary torch.save state size"
     )
     metrics["quantization"] = dict(adapter.quantization_metadata())
-    try:
+    if max_series is not None or max_windows is not None:
         metrics["official_evaluator"] = {
-            "status": "completed",
-            "metrics": official_gift_eval_metrics(dataset, adapter, batch_size=512),
+            "status": "not_run",
+            "reason": "bounded probe; official full-dataset aggregate is not defined for a subset",
         }
-    except Exception as exc:
-        metrics["official_evaluator"] = {
-            "status": "error",
-            "error": f"{type(exc).__name__}: {exc}",
-        }
+    else:
+        try:
+            metrics["official_evaluator"] = {
+                "status": "completed",
+                "metrics": official_gift_eval_metrics(
+                    dataset,
+                    adapter,
+                    batch_size=512,
+                    precomputed_forecasts=forecasts,
+                ),
+            }
+        except Exception as exc:
+            metrics["official_evaluator"] = {
+                "status": "error",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
 
     levels = forecasts[0].quantile_levels
     targets = np.stack([item.window.ground_truth for item in forecasts])
     points = np.stack([item.point_forecast for item in forecasts])
     quantiles = np.stack([item.quantile_forecasts for item in forecasts])
     rows = forecast_rows(
-        dataset=f"{dataset_name}/{term}",
+        dataset=dataset_label,
         series_ids=[item.window.series_id for item in forecasts],
         window_ids=[item.window.window_id for item in forecasts],
         timestamps=[item.window.timestamps for item in forecasts],
@@ -275,7 +319,7 @@ def _run_dataset(
     )
     write_parquet(rows, run_dir / "forecasts.parquet")
     contexts = context_rows(
-        dataset=f"{dataset_name}/{term}",
+        dataset=dataset_label,
         series_ids=[item.window.series_id for item in forecasts],
         window_ids=[item.window.window_id for item in forecasts],
         histories=[item.window.history for item in forecasts],
@@ -307,6 +351,11 @@ def _run_dataset(
             "official_windows_per_series": int(dataset.windows),
             "num_series": metrics["num_series"],
             "num_windows": metrics["num_windows"],
+            "evaluation_scope": (
+                "bounded_probe"
+                if max_series is not None or max_windows is not None
+                else "full_official_test_windows"
+            ),
         },
         "reproducibility": {
             "timesfm_version": "2.0.2",
@@ -329,10 +378,15 @@ def _run_dataset(
         {
             "status": "completed",
             "precision": variant_name,
-            "dataset": f"{dataset_name}/{term}",
+            "dataset": dataset_label,
             "run_dir": str(run_dir),
             "num_series": metrics["num_series"],
             "num_windows": metrics["num_windows"],
+            "evaluation_scope": (
+                "bounded_probe"
+                if max_series is not None or max_windows is not None
+                else "full_official_test_windows"
+            ),
             "horizon": metrics["horizon"],
             "quantile_levels": levels.tolist(),
             "artifacts": [
@@ -362,7 +416,11 @@ def _run_variant(config_path: Path, config: dict[str, Any], variant: dict[str, A
     except Exception as exc:
         print(json.dumps({"variant": variant["name"], "status": "unsupported", "error": str(exc)}))
         for dataset_config in config["benchmark"]["datasets"]:
-            run_dir = _next_run_dir(output_root, str(variant["name"]), str(dataset_config["name"]))
+            run_dir = _next_run_dir(
+                output_root,
+                str(variant["name"]),
+                _dataset_label(dataset_config),
+            )
             _write_unsupported(
                 run_dir=run_dir,
                 config=config,
@@ -390,6 +448,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--variant", default=None)
+    parser.add_argument(
+        "--dataset",
+        action="append",
+        default=None,
+        help="Run only the matching dataset name or public label; may be repeated.",
+    )
+    parser.add_argument("--max-series", type=int, default=None, help="Bound a real probe by series count.")
+    parser.add_argument("--max-windows", type=int, default=None, help="Bound a real probe by window count.")
+    parser.add_argument("--output-root", type=Path, default=None, help="Override the configured artifact root.")
     parser.add_argument("--no-subprocess", action="store_true")
     return parser
 
@@ -397,6 +464,37 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = build_parser().parse_args()
     config = _load_yaml(args.config)
+    if args.dataset:
+        requested = set(args.dataset)
+        datasets = [
+            dataset
+            for dataset in config["benchmark"]["datasets"]
+            if str(dataset["name"]) in requested or _dataset_label(dataset) in requested
+        ]
+        if len(datasets) != len(requested):
+            available = sorted(
+                {
+                    str(dataset["name"])
+                    for dataset in config["benchmark"]["datasets"]
+                }
+                | {_dataset_label(dataset) for dataset in config["benchmark"]["datasets"]}
+            )
+            raise ValueError(f"Unknown dataset selector(s): {sorted(requested)}; available={available}")
+        config = {
+            **config,
+            "benchmark": {**config["benchmark"], "datasets": datasets},
+        }
+    if args.max_series is not None or args.max_windows is not None:
+        config = {
+            **config,
+            "benchmark": {
+                **config["benchmark"],
+                "max_series": args.max_series,
+                "max_windows": args.max_windows,
+            },
+        }
+    if args.output_root is not None:
+        config = {**config, "runtime": {**config["runtime"], "output_root": str(args.output_root)}}
     variants = list(config.get("variants", []))
     if args.variant is not None:
         variants = [variant for variant in variants if variant["name"] == args.variant]
@@ -406,7 +504,7 @@ def main() -> None:
         return
 
     for variant in variants:
-        if args.no_subprocess:
+        if args.no_subprocess or args.max_series is not None or args.max_windows is not None or args.output_root is not None:
             _run_variant(args.config, config, variant)
             continue
         subprocess.run(

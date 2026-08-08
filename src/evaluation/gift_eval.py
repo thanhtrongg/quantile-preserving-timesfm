@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import time
-from typing import Any, Iterable, Iterator, Mapping
+from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -291,8 +291,20 @@ def aggregate_diagnostics(results: list[WindowForecast]) -> dict[str, Any]:
     return metrics
 
 
-def official_gift_eval_metrics(dataset: Any, adapter: Any, *, batch_size: int = 512) -> dict[str, Any]:
-    """Run GIFT-Eval's recommended GluonTS evaluator on a fresh test iterator."""
+def official_gift_eval_metrics(
+    dataset: Any,
+    adapter: Any | None = None,
+    *,
+    batch_size: int = 512,
+    precomputed_forecasts: Sequence[WindowForecast] | None = None,
+) -> dict[str, Any]:
+    """Run GIFT-Eval's recommended GluonTS evaluator.
+
+    When ``precomputed_forecasts`` is provided, the official evaluator is run
+    on the already-produced model outputs in official test-window order. This
+    avoids invoking TimesFM a second time and is the path used by the
+    quantization pilot for expensive low-bit variants.
+    """
 
     try:
         from gluonts.ev.metrics import MASE, MeanWeightedSumQuantileLoss  # type: ignore[import-not-found]
@@ -302,7 +314,12 @@ def official_gift_eval_metrics(dataset: Any, adapter: Any, *, batch_size: int = 
             "The official GIFT-Eval evaluator requires its pinned GluonTS dependency."
         ) from exc
 
-    predictor = _TimesFMPredictor(adapter, prediction_length=int(dataset.prediction_length))
+    if precomputed_forecasts is not None:
+        predictor = _StoredForecastPredictor(precomputed_forecasts)
+    else:
+        if adapter is None:
+            raise ValueError("adapter is required when precomputed_forecasts is not supplied")
+        predictor = _TimesFMPredictor(adapter, prediction_length=int(dataset.prediction_length))
     seasonality = seasonality_from_frequency(getattr(dataset, "freq", None))
     # GluonTS 0.15.1 requires the levels explicitly.  These are the nine
     # quantiles returned by the official TimesFM 2.5 continuous head; the
@@ -364,4 +381,42 @@ class _TimesFMPredictor:
                 start_date=item["start"] + len(history),
                 item_id=item.get("item_id"),
                 forecast_keys=[str(level) for level in levels],
+            )
+
+
+class _StoredForecastPredictor:
+    """Minimal GluonTS Predictor facade over forecasts already produced by TimesFM."""
+
+    def __init__(self, forecasts: Sequence[WindowForecast]):
+        self.forecasts = list(forecasts)
+        self.prediction_length = (
+            int(self.forecasts[0].point_forecast.size) if self.forecasts else 0
+        )
+
+    def predict(self, dataset: Iterable[Mapping[str, Any]], **_: Any) -> Iterator[Any]:
+        try:
+            from gluonts.model.forecast import QuantileForecast  # type: ignore[import-not-found]
+        except ImportError as exc:
+            raise RuntimeError("GluonTS is required for the official evaluator") from exc
+        count = 0
+        for item in dataset:
+            if count >= len(self.forecasts):
+                raise AssertionError(
+                    "Official evaluator window count exceeds stored forecast count: "
+                    f"{count + 1} > {len(self.forecasts)}"
+                )
+            stored = self.forecasts[count]
+            history = _to_1d_target(item["target"], "input.target")
+            levels = np.asarray(stored.quantile_levels, dtype=float)
+            yield QuantileForecast(
+                forecast_arrays=np.asarray(stored.quantile_forecasts).T,
+                start_date=item["start"] + len(history),
+                item_id=item.get("item_id"),
+                forecast_keys=[str(level) for level in levels],
+            )
+            count += 1
+        if count != len(self.forecasts):
+            raise AssertionError(
+                "Official evaluator window count differs from stored forecast count: "
+                f"{count} != {len(self.forecasts)}"
             )

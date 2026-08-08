@@ -143,6 +143,7 @@ class TimesFMAdapter:
             "torchao_int8_weight_only",
             "torchao_int8_dynamic_activation_int8_weight",
             "torchao_int4_weight_only",
+            "torchao_prototype_int4_weight_only",
         }:
             raise ValueError(
                 "Unsupported quantization backend: "
@@ -153,6 +154,7 @@ class TimesFMAdapter:
         self.config = config
         self._autocast_dtype: Any | None = None
         self._quantized_linear_names: list[str] = []
+        self._unquantized_linear_names: list[str] = []
         self._excluded_quantization_module_types: list[str] = []
         self._model = model if model is not None else self._load_model()
         self._prepare_precision()
@@ -232,6 +234,24 @@ class TimesFMAdapter:
                     "TorchAO INT4 weight-only quantization is unavailable for "
                     f"this TimesFM/device combination: {type(exc).__name__}: {exc}"
                 ) from exc
+        elif backend == "torchao_prototype_int4_weight_only":
+            try:
+                from torchao.prototype.quantization.int4 import (
+                    PrototypeInt4WeightOnlyConfig,
+                )
+
+                quantize_(
+                    module,
+                    PrototypeInt4WeightOnlyConfig(
+                        group_size=self.config.quantization_group_size,
+                        set_inductor_config=False,
+                    ),
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    "TorchAO prototype CPU INT4 weight-only quantization is unavailable "
+                    f"for this TimesFM/device combination: {type(exc).__name__}: {exc}"
+                ) from exc
 
         if self.config.torch_compile:
             try:
@@ -249,6 +269,11 @@ class TimesFMAdapter:
             for name, child in module.named_modules()
             if child.__class__.__name__ in {"Linear"}
             and hasattr(getattr(child, "weight", None), "qdata")
+        ]
+        self._unquantized_linear_names = [
+            name
+            for name, child in module.named_modules()
+            if child.__class__.__name__ == "Linear" and name not in self._quantized_linear_names
         ]
         self._excluded_quantization_module_types = sorted(
             {
@@ -342,6 +367,7 @@ class TimesFMAdapter:
             "quantized_linear_module_count": len(self._quantized_linear_names),
             "quantized_linear_modules": self._quantized_linear_names,
             "total_linear_module_count": len(linear_names),
+            "unquantized_linear_modules": self._unquantized_linear_names,
             "excluded_module_types": self._excluded_quantization_module_types,
             "group_size": (
                 self.config.quantization_group_size
@@ -352,6 +378,7 @@ class TimesFMAdapter:
                 "torchao_int8_weight_only": "weight-only; symmetric per-row weight quantization; FP32 activations",
                 "torchao_int8_dynamic_activation_int8_weight": "dynamic symmetric activations and per-row int8 weights",
                 "torchao_int4_weight_only": "weight-only; groupwise int4; group_size=128; CPU compatibility check only",
+                "torchao_prototype_int4_weight_only": "prototype CPU A16W4; asymmetric per-group int4 weights; float32 activations; tinygemm; group_size=128",
                 "none": "no quantization",
             }.get(self.config.quantization_backend, "unknown"),
         }

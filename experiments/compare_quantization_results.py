@@ -1,4 +1,4 @@
-"""Join Milestone 2 artifacts and generate paper-ready comparison tables."""
+"""Join quantization artifacts and generate paper-ready comparison tables."""
 
 from __future__ import annotations
 
@@ -20,6 +20,15 @@ from src.metrics.quantization import (
 def _load_yaml(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         return yaml.safe_load(handle)
+
+
+def _dataset_label(dataset_config: dict[str, Any]) -> str:
+    return str(
+        dataset_config.get(
+            "label",
+            f"{dataset_config['name']}/{dataset_config.get('term', 'short')}",
+        )
+    )
 
 
 def _latest_run(root: Path, variant: str, dataset: str) -> Path | None:
@@ -79,6 +88,7 @@ def _summary_row(dataset: str, variant: str, run_dir: Path, metrics: dict[str, A
         "parameter_storage_mb": metrics.get("parameter_storage_mb"),
         "serialized_model_size_mb": metrics.get("serialized_model_size_mb"),
         "official_evaluator_status": metrics.get("official_evaluator", {}).get("status"),
+        "evaluation_scope": metrics.get("evaluation_scope", "full_official_test_windows"),
         "quantization_backend": metrics.get("quantization", {}).get("backend"),
     }
 
@@ -88,6 +98,7 @@ def _write_markdown(frame: pd.DataFrame, path: Path) -> None:
         "dataset",
         "precision",
         "status",
+        "evaluation_scope",
         "official_mase",
         "wql",
         "mean_pinball_loss",
@@ -102,6 +113,7 @@ def _write_markdown(frame: pd.DataFrame, path: Path) -> None:
         "Dataset",
         "Precision",
         "Status",
+        "Scope",
         "MASE",
         "WQL",
         "Pinball",
@@ -149,9 +161,7 @@ def build_comparisons(config_path: Path) -> dict[str, Any]:
     comparison_root = root / "comparisons"
     comparison_root.mkdir(parents=True, exist_ok=True)
     variants = [str(item["name"]) for item in config["variants"]]
-    datasets = [
-        f"{item['name']}/{item.get('term', 'short')}" for item in config["benchmark"]["datasets"]
-    ]
+    datasets = [_dataset_label(item) for item in config["benchmark"]["datasets"]]
 
     rows = []
     run_map: dict[tuple[str, str], Path] = {}
@@ -159,7 +169,14 @@ def build_comparisons(config_path: Path) -> dict[str, Any]:
         for variant in variants:
             run_dir = _latest_run(root, variant, dataset.split("/")[0] if dataset.count("/") == 1 else dataset.rsplit("/", 1)[0])
             if run_dir is None:
-                rows.append({"dataset": dataset, "precision": variant, "status": "missing"})
+                rows.append(
+                    {
+                        "dataset": dataset,
+                        "precision": variant,
+                        "status": "missing",
+                        "evaluation_scope": "not_executed_full",
+                    }
+                )
                 continue
             metrics = _read_json(run_dir / "metrics.json")
             run_map[(dataset, variant)] = run_dir
@@ -219,14 +236,33 @@ def build_comparisons(config_path: Path) -> dict[str, Any]:
                     "delta_mase": candidate_row.get("official_mase") - reference_row.get("official_mase"),
                     "delta_wql": candidate_row.get("wql") - reference_row.get("wql"),
                     "delta_coverage_80": candidate_row.get("coverage_80") - reference_row.get("coverage_80"),
+                    "delta_coverage_80_pp": 100.0
+                    * (candidate_row.get("coverage_80") - reference_row.get("coverage_80")),
+                    "delta_width_80": candidate_row.get("width_80") - reference_row.get("width_80"),
                     "relative_mase_change": (candidate_row.get("official_mase") - reference_row.get("official_mase")) / reference_row.get("official_mase"),
                     "relative_wql_change": (candidate_row.get("wql") - reference_row.get("wql")) / reference_row.get("wql"),
+                    "relative_width_change": (candidate_row.get("width_80") - reference_row.get("width_80")) / reference_row.get("width_80"),
                 }
             )
 
     distortion = pd.concat(distortion_frames, ignore_index=True) if distortion_frames else pd.DataFrame()
     distortion.to_csv(comparison_root / "quantile_distortion.csv", index=False)
-    pd.DataFrame(deltas).to_csv(comparison_root / "quantization_deltas.csv", index=False)
+    delta_frame = pd.DataFrame(deltas)
+    delta_frame.to_csv(comparison_root / "quantization_deltas.csv", index=False)
+    if not delta_frame.empty:
+        delta_frame.to_markdown(
+            comparison_root / "quantization_deltas.md", index=False, floatfmt=".6f"
+        )
+        delta_frame.to_latex(
+            comparison_root / "quantization_deltas.tex", index=False, float_format="%.6f"
+        )
+    if not distortion.empty:
+        distortion.to_markdown(
+            comparison_root / "quantile_distortion.md", index=False, floatfmt=".6f"
+        )
+        distortion.to_latex(
+            comparison_root / "quantile_distortion.tex", index=False, float_format="%.6f"
+        )
     pd.DataFrame(alignment).to_json(comparison_root / "alignment_validation.json", orient="records", indent=2)
     return {
         "summary_path": str(comparison_root / "quantization_summary.csv"),

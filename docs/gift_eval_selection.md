@@ -69,3 +69,24 @@ but its current `to_univariate` expansion produces 45,000 windows. It was
 therefore not used as primary CPU evidence in Milestone 2. This is a workload
 scope decision, not a contamination clearance; its status remains lower
 relative risk but unverified for direct overlap.
+
+## Milestone 3 execution status
+
+Milestone 3 kept the four selected configurations unchanged. Their
+contamination status is unchanged as well: all remain potentially contaminated
+because the TimesFM 2.5 model card lists `GiftEvalPretrain` among pretraining
+sources; none is certified leakage-free.
+
+| Configuration | Resolved official windows | Contamination status | M3 execution status |
+|---|---:|---|---|
+| `saugeenday/D/short` | 20 | Lower-relative-risk candidate; direct overlap unverified | Full FP32/BF16/INT8 reuse and real INT4 |
+| `bizitobs_l2c/5T/short` | 140 | Lower-relative-risk candidate; direct overlap unverified | Full FP32/BF16/INT8 reuse; INT4 not completed on CPU |
+| `bitbrains_fast_storage/5T/short` | 45,000 | Lower-relative-risk candidate; direct overlap unverified | One-window real probe; full low-bit matrix resource-limited |
+| `car_parts_with_missing/M/short` | 2,674 | Lower-relative-risk candidate; direct overlap unverified | One-window real probe; full low-bit matrix resource-limited |
+
+The downloaded official Car Parts snapshot is stored at
+`car_parts_with_missing` and reports monthly frequency `M`; the public
+configuration label remains `car_parts_with_missing/M/short`. Bounded probes
+are retained separately under `results/milestone3_probes/` and are not used as
+official aggregate metrics. Electricity remains development-only and was not
+used for the M3 matrix.

@@ -1,0 +1,56 @@
+model:
+  checkpoint: google/timesfm-2.5-200m-pytorch
+  context_length: 1024
+  max_horizon: 256
+  quantile_head: true
+  fix_quantile_crossing: true
+  normalize_inputs: true
+  force_flip_invariance: true
+  infer_is_positive: false
+
+benchmark:
+  name: gift_eval
+  storage_env_var: GIFT_EVAL
+  to_univariate: true
+  prediction_length: null
+  datasets:
+    - name: saugeenday/D
+      term: short
+      label: saugeenday/D/short
+    - name: bizitobs_l2c/5T
+      term: short
+      label: bizitobs_l2c/5T/short
+    - name: bitbrains_fast_storage/5T
+      term: short
+      label: bitbrains_fast_storage/5T/short
+    # The official downloaded dataset is stored at car_parts_with_missing;
+    # its metadata frequency is M, so the public configuration label is
+    # car_parts_with_missing/M/short.
+    - name: car_parts_with_missing
+      term: short
+      label: car_parts_with_missing/M/short
+
+variants:
+  - name: fp32
+    dtype: float32
+    quantization_backend: none
+    torch_compile: false
+  - name: bf16
+    dtype: bfloat16
+    quantization_backend: none
+    torch_compile: false
+  - name: int8
+    dtype: float32
+    quantization_backend: torchao_int8_weight_only
+    torch_compile: false
+  - name: int4
+    dtype: float32
+    quantization_backend: torchao_prototype_int4_weight_only
+    quantization_group_size: 128
+    torch_compile: false
+
+runtime:
+  device: auto
+  batch_size: 8
+  seed: 20260808
+  output_root: results/milestone3

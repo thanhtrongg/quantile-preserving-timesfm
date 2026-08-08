@@ -1,4 +1,4 @@
-"""Generate publication-ready Milestone 2 comparison figures."""
+"""Generate publication-ready low-bit comparison figures."""
 
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ def _ordered(frame: pd.DataFrame) -> pd.DataFrame:
 
 def _save(figure: plt.Figure, output_root: Path, stem: str) -> None:
     figure.savefig(output_root / f"{stem}.pdf", bbox_inches="tight")
+    figure.savefig(output_root / f"{stem}.svg", bbox_inches="tight")
     figure.savefig(output_root / f"{stem}.png", dpi=300, bbox_inches="tight")
     plt.close(figure)
 
@@ -53,12 +54,11 @@ def _plot_panel(axis: plt.Axes, frame: pd.DataFrame, column: str, title: str, yl
 
 def plot_impact(comparison_root: Path) -> None:
     summary = _ordered(pd.read_csv(comparison_root / "quantization_summary.csv"))
-    completed = summary[summary["status"] == "completed"]
     figure, axes = plt.subplots(2, 2, figsize=(12, 8), constrained_layout=True)
-    _plot_panel(axes[0, 0], completed, "official_mase", "Point accuracy", "Official MASE")
-    _plot_panel(axes[0, 1], completed, "wql", "Probabilistic accuracy", "Mean weighted quantile loss")
-    _plot_panel(axes[1, 0], completed, "coverage_80", "Interval calibration", "q10–q90 coverage")
-    _plot_panel(axes[1, 1], completed, "parameter_storage_mb", "Parameter storage", "MiB")
+    _plot_panel(axes[0, 0], summary, "official_mase", "Point accuracy", "Official MASE")
+    _plot_panel(axes[0, 1], summary, "wql", "Probabilistic accuracy", "Mean weighted quantile loss")
+    _plot_panel(axes[1, 0], summary, "coverage_80", "Interval calibration", "q10–q90 coverage")
+    _plot_panel(axes[1, 1], summary, "parameter_storage_mb", "Parameter storage", "MiB")
     handles, labels = axes[0, 0].get_legend_handles_labels()
     figure.legend(handles, labels, loc="outside lower center", ncol=max(1, len(labels)))
     _save(figure, comparison_root, "quantization_impact")
@@ -85,6 +85,41 @@ def plot_distortion(comparison_root: Path) -> None:
     axis.grid(alpha=0.25)
     axis.legend(loc="best", fontsize=8)
     _save(figure, comparison_root, "quantile_distortion")
+
+
+def plot_degradation(comparison_root: Path) -> None:
+    deltas = pd.read_csv(comparison_root / "quantization_deltas.csv")
+    deltas = deltas[deltas["precision"].isin(["int8", "int4"])].copy()
+    summary = pd.read_csv(comparison_root / "quantization_summary.csv")
+    datasets = list(summary["dataset"].drop_duplicates())
+    x = np.arange(len(datasets), dtype=float)
+    width = 0.34
+    figure, axes = plt.subplots(1, 2, figsize=(12, 5.5), constrained_layout=True)
+    for axis, column, title in zip(
+        axes,
+        ["relative_mase_change", "relative_wql_change"],
+        ["Relative point degradation", "Relative probabilistic degradation"],
+        strict=True,
+    ):
+        for offset, precision in [(-width / 2, "int8"), (width / 2, "int4")]:
+            values = []
+            for dataset in datasets:
+                row = deltas[(deltas["dataset"] == dataset) & (deltas["precision"] == precision)]
+                values.append(float(row[column].iloc[0] * 100.0) if not row.empty else np.nan)
+            axis.bar(
+                x + offset,
+                values,
+                width,
+                label=precision.upper(),
+                color=COLORS[precision],
+            )
+        axis.axhline(0.0, color="#455a64", linewidth=0.9)
+        axis.set_xticks(x, datasets, rotation=25, ha="right")
+        axis.set_ylabel("Relative change (%)")
+        axis.set_title(title)
+        axis.grid(axis="y", alpha=0.25)
+    axes[0].legend(loc="best")
+    _save(figure, comparison_root, "point_vs_probabilistic_degradation")
 
 
 def _latest_run(root: Path, precision: str, dataset: str) -> Path:
@@ -146,6 +181,7 @@ def main() -> None:
     args = parser.parse_args()
     plot_impact(args.comparison_root)
     plot_distortion(args.comparison_root)
+    plot_degradation(args.comparison_root)
     plot_example(args.comparison_root, args.dataset, args.window_id, args.comparison_root)
     print(args.comparison_root)
 
